@@ -91,6 +91,9 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         settings_scroll = QScrollArea()
         settings_scroll.setWidgetResizable(True)
+        settings_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        settings_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         settings_scroll.setWidget(self._settings_page())
         self.tabs.addTab(settings_scroll, "设置")
         outer.addWidget(self.tabs)
@@ -122,9 +125,12 @@ class MainWindow(QMainWindow):
         """构建左右两列设置，避免长表单难以查看。"""
         page = QWidget()
         columns = QHBoxLayout(page)
-        columns.setContentsMargins(8, 8, 8, 8)
+        columns.setContentsMargins(10, 12, 10, 16)
+        columns.setSpacing(12)
         left_column = QVBoxLayout()
         right_column = QVBoxLayout()
+        left_column.setSpacing(12)
+        right_column.setSpacing(12)
         columns.addLayout(left_column, 1)
         columns.addLayout(right_column, 1)
         cfg = self.config_store.config
@@ -269,6 +275,10 @@ class MainWindow(QMainWindow):
         actions_form.addRow(save_button)
         right_column.addWidget(actions_group)
         right_column.addStretch(1)
+
+        # Keep group titles and first rows clear at small window heights.
+        page.setMinimumWidth(760)
+        page.setMinimumHeight(720)
 
         self.com0com_process = QProcess(self)
         self.com0com_process.finished.connect(self._com0com_finished)
@@ -579,7 +589,9 @@ def apply_dark_theme(app) -> None:
     app.setStyleSheet(
         """
         QWidget { background: #10151b; color: #e6edf3; font-family: 'Microsoft YaHei', 'Segoe UI'; }
-        QGroupBox, QTabWidget::pane { border: 1px solid #35414c; }
+        QGroupBox { border: 1px solid #35414c; border-radius: 2px; margin-top: 12px; padding-top: 8px; }
+        QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 10px; padding: 0 5px; color: #e6edf3; background: #10151b; }
+        QTabWidget::pane { border: 1px solid #35414c; }
         QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit { background: #18212a; border: 1px solid #41515e; padding: 4px; }
         QPushButton { background: #263441; border: 1px solid #4d6271; padding: 7px 12px; }
         QPushButton:hover { background: #345064; }
