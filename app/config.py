@@ -87,6 +87,11 @@ class RotatorConfig:
     hardware_coord_deg: float = 0.0
     true_azimuth_deg: float = 0.0
     last_true_azimuth_deg: float = 0.0
+    # com0com settings are kept outside the bundle with the rest of the user
+    # configuration.  Empty path means use PATH/Program Files discovery.
+    com0com_setupc_path: str = ""
+    com0com_left_port: str = "COM10"
+    com0com_right_port: str = "COM11"
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

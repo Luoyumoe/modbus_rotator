@@ -12,11 +12,20 @@ def test_config_path_uses_localappdata(monkeypatch):
 
 def test_config_round_trip_and_atomic_parent(tmp_path):
     path = tmp_path / "nested" / "rotator_config.json"
-    config = RotatorConfig(serial_port="COM10", true_azimuth_deg=123.5)
+    config = RotatorConfig(
+        serial_port="COM10",
+        true_azimuth_deg=123.5,
+        com0com_setupc_path=r"C:\Tools\com0com\setupc.exe",
+        com0com_left_port="VCOM_A",
+        com0com_right_port="VCOM_B",
+    )
     save_config(config, path)
     loaded = load_config(path)
     assert loaded.serial_port == "COM10"
     assert loaded.true_azimuth_deg == 123.5
+    assert loaded.com0com_setupc_path.endswith(r"com0com\setupc.exe")
+    assert loaded.com0com_left_port == "VCOM_A"
+    assert loaded.com0com_right_port == "VCOM_B"
     assert not list(path.parent.glob("*.tmp"))
 
 

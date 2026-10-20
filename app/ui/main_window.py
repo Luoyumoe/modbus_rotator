@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QDoubleSpinBox,
     QDockWidget,
+    QFileDialog,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -39,7 +40,7 @@ class MainWindow(QMainWindow):
         self.worker = worker
         self.planner = planner
         self.services = services
-        self.setWindowTitle("Modbus Rotator")
+        self.setWindowTitle("Modbus 转台")
         self.resize(1100, 760)
         self._build_ui()
         self._connect_worker()
@@ -50,11 +51,11 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
         header = QHBoxLayout()
-        self.connection_label = QLabel("OFFLINE")
+        self.connection_label = QLabel("离线")
         self.connection_label.setObjectName("connectionLabel")
-        header.addWidget(QLabel("MODBUS ROTATOR"))
+        header.addWidget(QLabel("Modbus 转台"))
         header.addStretch()
-        self.debug_toggle = QPushButton("Debug terminal")
+        self.debug_toggle = QPushButton("调试终端")
         self.debug_toggle.setCheckable(True)
         header.addWidget(self.debug_toggle)
         header.addWidget(self.connection_label)
@@ -64,22 +65,22 @@ class MainWindow(QMainWindow):
         self.compass = CompassWidget()
         body.addWidget(self.compass, 2)
         side = QVBoxLayout()
-        self.current_label = QLabel("000.0 deg")
+        self.current_label = QLabel("000.0°")
         self.current_label.setObjectName("currentAngle")
-        side.addWidget(QLabel("CURRENT AZIMUTH"))
+        side.addWidget(QLabel("当前方位"))
         side.addWidget(self.current_label)
-        self.target_label = QLabel("Target: --")
+        self.target_label = QLabel("目标：--")
         side.addWidget(self.target_label)
         presets = QGridLayout()
         for index, (name, angle) in enumerate(
             (("N", 0), ("NE", 45), ("E", 90), ("SE", 135), ("S", 180), ("SW", 225), ("W", 270), ("NW", 315), ("EU", 320), ("NA", 35), ("JA", 65), ("OC", 150))
         ):
             button = QPushButton(name)
-            button.setToolTip(f"Set target {angle} degrees")
+            button.setToolTip(f"设为 {angle}°")
             button.clicked.connect(lambda _checked=False, value=angle: self.submit_target(value))
             presets.addWidget(button, index // 4, index % 4)
         side.addLayout(presets)
-        stop_button = QPushButton("STOP")
+        stop_button = QPushButton("立即停止")
         stop_button.setObjectName("stopButton")
         stop_button.clicked.connect(self.stop_motion)
         side.addWidget(stop_button)
@@ -91,9 +92,9 @@ class MainWindow(QMainWindow):
         settings_scroll = QScrollArea()
         settings_scroll.setWidgetResizable(True)
         settings_scroll.setWidget(self._settings_page())
-        self.tabs.addTab(settings_scroll, "Settings")
+        self.tabs.addTab(settings_scroll, "设置")
         outer.addWidget(self.tabs)
-        self.debug_dock = QDockWidget("Debug terminal", self)
+        self.debug_dock = QDockWidget("调试终端", self)
         self.debug_dock.setObjectName("debugDock")
         self.debug_dock.setWidget(self._debug_page())
         self.debug_dock.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea)
@@ -102,9 +103,9 @@ class MainWindow(QMainWindow):
         self.debug_toggle.toggled.connect(self.debug_dock.setVisible)
         self.debug_dock.visibilityChanged.connect(self.debug_toggle.setChecked)
         status = QHBoxLayout()
-        self.run_status = QLabel("STOPPED")
-        self.temperature_label = QLabel("Temp --")
-        self.limit_label = QLabel("Limits")
+        self.run_status = QLabel("已停止")
+        self.temperature_label = QLabel("温度 --")
+        self.limit_label = QLabel("限位")
         self.s0_indicator = self._indicator("S0")
         self.s1_indicator = self._indicator("S1")
         self.s2_indicator = self._indicator("S2")
@@ -118,40 +119,64 @@ class MainWindow(QMainWindow):
         outer.addLayout(status)
 
     def _settings_page(self) -> QWidget:
+        """构建左右两列设置，避免长表单难以查看。"""
         page = QWidget()
-        layout = QFormLayout(page)
+        columns = QHBoxLayout(page)
+        columns.setContentsMargins(8, 8, 8, 8)
+        left_column = QVBoxLayout()
+        right_column = QVBoxLayout()
+        columns.addLayout(left_column, 1)
+        columns.addLayout(right_column, 1)
         cfg = self.config_store.config
+
+        serial_group = QGroupBox("串口与旋转")
+        serial_form = QFormLayout(serial_group)
         self.port_edit = QLineEdit(cfg.serial_port)
-        layout.addRow("Serial port", self.port_edit)
+        serial_form.addRow("Modbus 串口", self.port_edit)
         self.baud_combo = QComboBox()
         self.baud_combo.addItems(["9600", "19200", "38400", "57600", "115200"])
         self.baud_combo.setCurrentText(str(cfg.baudrate))
-        layout.addRow("Baudrate", self.baud_combo)
-        self.slave_spin = QSpinBox(); self.slave_spin.setRange(1, 247); self.slave_spin.setValue(cfg.slave_id)
-        layout.addRow("Slave ID", self.slave_spin)
-        self.timeout_spin = QDoubleSpinBox(); self.timeout_spin.setRange(0.1, 10); self.timeout_spin.setSingleStep(0.1); self.timeout_spin.setValue(cfg.timeout_s)
-        layout.addRow("Timeout (s)", self.timeout_spin)
-        self.span_spin = QDoubleSpinBox(); self.span_spin.setRange(1, 450); self.span_spin.setValue(cfg.rotation_span_deg)
-        self.stop_point_spin = QDoubleSpinBox(); self.stop_point_spin.setRange(-720, 720); self.stop_point_spin.setValue(cfg.stop_point_deg)
-        layout.addRow("Rotation span", self.span_spin)
-        layout.addRow("Stop point", self.stop_point_spin)
+        serial_form.addRow("波特率", self.baud_combo)
+        self.slave_spin = QSpinBox()
+        self.slave_spin.setRange(1, 247)
+        self.slave_spin.setValue(cfg.slave_id)
+        serial_form.addRow("从机地址", self.slave_spin)
+        self.timeout_spin = QDoubleSpinBox()
+        self.timeout_spin.setRange(0.1, 10)
+        self.timeout_spin.setSingleStep(0.1)
+        self.timeout_spin.setValue(cfg.timeout_s)
+        serial_form.addRow("超时（秒）", self.timeout_spin)
+        self.span_spin = QDoubleSpinBox()
+        self.span_spin.setRange(1, 450)
+        self.span_spin.setValue(cfg.rotation_span_deg)
+        self.span_spin.setSuffix("°")
+        self.stop_point_spin = QDoubleSpinBox()
+        self.stop_point_spin.setRange(-720, 720)
+        self.stop_point_spin.setValue(cfg.stop_point_deg)
+        self.stop_point_spin.setSuffix("°")
+        serial_form.addRow("旋转范围", self.span_spin)
+        serial_form.addRow("止点", self.stop_point_spin)
         self.calibrate_angle = QDoubleSpinBox()
         self.calibrate_angle.setRange(0.0, 359.9)
         self.calibrate_angle.setDecimals(1)
-        self.calibrate_angle.setSuffix(" deg")
+        self.calibrate_angle.setSuffix("°")
         calibrate_row = QHBoxLayout()
         calibrate_row.addWidget(self.calibrate_angle)
-        calibrate_button = QPushButton("Calibrate current position")
+        calibrate_button = QPushButton("校准当前位置")
         calibrate_button.clicked.connect(self._calibrate_current)
-        north_button = QPushButton("Return north")
+        north_button = QPushButton("回零北向")
         north_button.clicked.connect(lambda: self.submit_target(0.0))
         calibrate_row.addWidget(calibrate_button)
         calibrate_row.addWidget(north_button)
-        layout.addRow("Azimuth calibration", calibrate_row)
-        self.simulate_check = QCheckBox("Simulation backend")
+        serial_form.addRow("方位校准", calibrate_row)
+        self.simulate_check = QCheckBox("使用模拟设备")
         self.simulate_check.setChecked(cfg.simulate)
-        layout.addRow(self.simulate_check)
+        serial_form.addRow(self.simulate_check)
+        left_column.addWidget(serial_group)
+
         registers = cfg.registers
+        register_group = QGroupBox("驱动器参数与触发值")
+        register_form = QFormLayout(register_group)
         self.f08_spin = self._register_spin(registers.smoothing_f08)
         self.f04_spin = self._register_spin(registers.max_frequency_f04)
         self.f05_spin = self._register_spin(registers.min_frequency_f05)
@@ -159,66 +184,95 @@ class MainWindow(QMainWindow):
         self.p4_spin = self._register_spin(registers.reverse_speed_p4)
         self.f13_spin = self._register_spin(registers.soft_stop_f13)
         self.f14_spin = self._register_spin(registers.enable_f14)
-        layout.addRow("F-08 smoothing", self.f08_spin)
-        layout.addRow("F-04 max frequency", self.f04_spin)
-        layout.addRow("F-05 min frequency", self.f05_spin)
-        layout.addRow("P-2 forward speed", self.p2_spin)
-        layout.addRow("P-4 reverse speed", self.p4_spin)
-        layout.addRow("F-13 soft stop", self.f13_spin)
-        layout.addRow("F-14 enable", self.f14_spin)
+        register_form.addRow("F-08 平滑度", self.f08_spin)
+        register_form.addRow("F-04 最大频率", self.f04_spin)
+        register_form.addRow("F-05 最小频率", self.f05_spin)
+        register_form.addRow("P-2 正转速度", self.p2_spin)
+        register_form.addRow("P-4 反转速度", self.p4_spin)
+        register_form.addRow("F-13 软停止", self.f13_spin)
+        register_form.addRow("F-14 使能", self.f14_spin)
         self.stop_trigger_spin = self._register_spin(registers.stop_trigger)
         self.forward_trigger_spin = self._register_spin(registers.forward_trigger)
         self.reverse_trigger_spin = self._register_spin(registers.reverse_trigger)
-        layout.addRow("Stop trigger", self.stop_trigger_spin)
-        layout.addRow("Forward trigger", self.forward_trigger_spin)
-        layout.addRow("Reverse trigger", self.reverse_trigger_spin)
+        register_form.addRow("停止触发值", self.stop_trigger_spin)
+        register_form.addRow("正转触发值", self.forward_trigger_spin)
+        register_form.addRow("反转触发值", self.reverse_trigger_spin)
+        left_column.addWidget(register_group)
+        left_column.addStretch(1)
+
         network = cfg.network
-        self.n1mm_check = QCheckBox("N1MM UDP")
+        network_group = QGroupBox("网络服务")
+        network_form = QFormLayout(network_group)
+        self.n1mm_check = QCheckBox("启用 N1MM UDP")
         self.n1mm_check.setChecked(network.n1mm_enabled)
         self.n1mm_host = QLineEdit(network.n1mm_host)
         self.n1mm_port = self._port_spin(network.n1mm_port)
-        layout.addRow(self.n1mm_check, self.n1mm_host)
-        layout.addRow("N1MM port", self.n1mm_port)
-        self.hamlib_check = QCheckBox("Hamlib rotctld")
+        network_form.addRow(self.n1mm_check, self.n1mm_host)
+        network_form.addRow("N1MM 端口", self.n1mm_port)
+        self.hamlib_check = QCheckBox("启用 Hamlib rotctld")
         self.hamlib_check.setChecked(network.hamlib_enabled)
         self.hamlib_host = QLineEdit(network.hamlib_host)
         self.hamlib_port = self._port_spin(network.hamlib_port)
-        layout.addRow(self.hamlib_check, self.hamlib_host)
-        layout.addRow("Hamlib port", self.hamlib_port)
-        self.gs232_check = QCheckBox("GS-232B")
+        network_form.addRow(self.hamlib_check, self.hamlib_host)
+        network_form.addRow("Hamlib 端口", self.hamlib_port)
+        self.gs232_check = QCheckBox("启用 GS-232B")
         self.gs232_check.setChecked(network.gs232_enabled)
         self.gs232_port = QLineEdit(network.gs232_port)
         self.gs232_baudrate = self._port_spin(network.gs232_baudrate)
-        layout.addRow(self.gs232_check, self.gs232_port)
-        layout.addRow("GS-232 baud", self.gs232_baudrate)
+        network_form.addRow(self.gs232_check, self.gs232_port)
+        network_form.addRow("GS-232 波特率", self.gs232_baudrate)
         network_buttons = QHBoxLayout()
-        self.network_apply_button = QPushButton("Apply network services")
+        self.network_apply_button = QPushButton("应用网络服务")
         self.network_apply_button.clicked.connect(self._apply_network_services)
-        self.network_stop_button = QPushButton("Stop network services")
+        self.network_stop_button = QPushButton("停止网络服务")
         self.network_stop_button.clicked.connect(self._stop_network_services)
         network_buttons.addWidget(self.network_apply_button)
         network_buttons.addWidget(self.network_stop_button)
-        layout.addRow(network_buttons)
-        self.com0com_manager = Com0ComManager()
-        self.com0com_status = QLabel("com0com status unknown")
+        network_form.addRow(network_buttons)
+        right_column.addWidget(network_group)
+
+        self.com0com_manager = Com0ComManager(setupc_path=cfg.com0com_setupc_path)
+        com_group = QGroupBox("com0com 虚拟串口")
+        com_form = QFormLayout(com_group)
+        self.com0com_setupc = QLineEdit(cfg.com0com_setupc_path)
+        self.com0com_setupc.setPlaceholderText("留空则自动搜索")
+        setupc_row = QHBoxLayout()
+        setupc_row.addWidget(self.com0com_setupc)
+        browse_setupc = QPushButton("浏览…")
+        browse_setupc.clicked.connect(self._browse_setupc)
+        setupc_row.addWidget(browse_setupc)
+        com_form.addRow("setupc.exe 路径", setupc_row)
+        self.com0com_left_port = QLineEdit(cfg.com0com_left_port)
+        self.com0com_right_port = QLineEdit(cfg.com0com_right_port)
+        com_form.addRow("左端口名称", self.com0com_left_port)
+        com_form.addRow("右端口名称", self.com0com_right_port)
+        self.com0com_status = QLabel("尚未检查 com0com")
+        self.com0com_status.setWordWrap(True)
+        com_form.addRow(self.com0com_status)
         com0com_buttons = QHBoxLayout()
-        check_com0com = QPushButton("Check com0com")
+        check_com0com = QPushButton("检查 com0com")
         check_com0com.clicked.connect(self._check_com0com)
-        create_pair = QPushButton("Create COM10/COM11")
+        create_pair = QPushButton("创建虚拟串口对")
         create_pair.clicked.connect(self._create_com0com_pair)
         com0com_buttons.addWidget(check_com0com)
         com0com_buttons.addWidget(create_pair)
-        layout.addRow(self.com0com_status)
-        layout.addRow(com0com_buttons)
+        com_form.addRow(com0com_buttons)
+        right_column.addWidget(com_group)
+
+        actions_group = QGroupBox("应用")
+        actions_form = QFormLayout(actions_group)
+        self.apply_safety_button = QPushButton("应用安全参数")
+        self.apply_safety_button.clicked.connect(lambda: self.worker.submit("apply_safety_parameters"))
+        actions_form.addRow(self.apply_safety_button)
+        save_button = QPushButton("保存设置")
+        save_button.clicked.connect(self.save_settings)
+        actions_form.addRow(save_button)
+        right_column.addWidget(actions_group)
+        right_column.addStretch(1)
+
         self.com0com_process = QProcess(self)
         self.com0com_process.finished.connect(self._com0com_finished)
         self.com0com_process.errorOccurred.connect(self._com0com_error)
-        self.apply_safety_button = QPushButton("Apply safety parameters")
-        self.apply_safety_button.clicked.connect(lambda: self.worker.submit("apply_safety_parameters"))
-        layout.addRow(self.apply_safety_button)
-        save_button = QPushButton("Save settings")
-        save_button.clicked.connect(self.save_settings)
-        layout.addRow(save_button)
         return page
 
     @staticmethod
@@ -237,7 +291,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _indicator(name: str) -> QLabel:
-        indicator = QLabel(f"{name} OFF")
+        indicator = QLabel(f"{name} 关")
         indicator.setProperty("active", False)
         indicator.setMinimumWidth(55)
         return indicator
@@ -250,11 +304,11 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         self.register_address = QLineEdit("0x0002")
         self.register_value = QLineEdit("0")
-        read_button = QPushButton("Read register")
+        read_button = QPushButton("读取寄存器")
         read_button.clicked.connect(self._debug_read)
-        write_button = QPushButton("Write register")
+        write_button = QPushButton("写入寄存器")
         write_button.clicked.connect(self._debug_write)
-        trigger_button = QPushButton("Test trigger")
+        trigger_button = QPushButton("测试触发值")
         trigger_button.clicked.connect(self._debug_trigger)
         row.addWidget(self.register_address); row.addWidget(self.register_value); row.addWidget(read_button); row.addWidget(write_button); row.addWidget(trigger_button)
         layout.addLayout(row)
@@ -272,15 +326,15 @@ class MainWindow(QMainWindow):
 
     def _refresh_from_config(self) -> None:
         angle = self.planner.display_angle_deg
-        self.current_label.setText(f"{angle:05.1f} deg")
+        self.current_label.setText(f"{angle:05.1f}°")
         self.compass.set_angles(angle)
 
     def submit_target(self, angle: float) -> None:
         plan = self.planner.plan(angle)
         if not plan.accepted:
-            self.debug_log.appendPlainText(f"Motion rejected: {plan.reason}")
+            self.debug_log.appendPlainText(f"运动被拒绝：{plan.reason}")
             return
-        self.target_label.setText(f"Target: {angle % 360.0:05.1f} deg")
+        self.target_label.setText(f"目标：{angle % 360.0:05.1f}°")
         if hasattr(self.worker, "submit"):
             registers = self.config_store.config.registers
             self.worker.submit(
@@ -298,7 +352,7 @@ class MainWindow(QMainWindow):
         if hasattr(self.worker, "request_stop"):
             self.worker.request_stop(self.config_store.config.registers.stop_trigger)
         self.planner.motion_running = False
-        self.run_status.setText("STOPPED")
+        self.run_status.setText("已停止")
 
     def save_settings(self) -> None:
         self.config_store.update(
@@ -309,6 +363,9 @@ class MainWindow(QMainWindow):
             rotation_span_deg=self.span_spin.value(),
             stop_point_deg=self.stop_point_spin.value(),
             simulate=self.simulate_check.isChecked(),
+            com0com_setupc_path=self.com0com_setupc.text().strip(),
+            com0com_left_port=self.com0com_left_port.text().strip() or "COM10",
+            com0com_right_port=self.com0com_right_port.text().strip() or "COM11",
             registers={
                 "smoothing_f08": self.f08_spin.value(),
                 "max_frequency_f04": self.f04_spin.value(),
@@ -322,14 +379,15 @@ class MainWindow(QMainWindow):
                 "reverse_trigger": self.reverse_trigger_spin.value(),
             },
         )
+        self.com0com_manager.set_setupc_path(self.com0com_setupc.text().strip())
         self.planner.set_limits(self.span_spin.value(), self.stop_point_spin.value())
-        self.debug_log.appendPlainText("Settings saved; serial and simulation changes apply after restart")
+        self.debug_log.appendPlainText("设置已保存；串口和模拟设备重启后生效")
 
     def _debug_read(self) -> None:
         try:
             address = int(self.register_address.text(), 0)
         except ValueError:
-            self.debug_log.appendPlainText("Invalid register address")
+            self.debug_log.appendPlainText("寄存器地址无效")
             return
         self.worker.submit("read_u16", address)
 
@@ -338,7 +396,7 @@ class MainWindow(QMainWindow):
             address = int(self.register_address.text(), 0)
             value = int(self.register_value.text(), 0)
         except ValueError:
-            self.debug_log.appendPlainText("Invalid register value")
+            self.debug_log.appendPlainText("寄存器值无效")
             return
         self.worker.submit("write_u16", address, value)
 
@@ -346,10 +404,10 @@ class MainWindow(QMainWindow):
         try:
             value = int(self.register_value.text(), 0)
         except ValueError:
-            self.debug_log.appendPlainText("Invalid trigger value")
+            self.debug_log.appendPlainText("触发值无效")
             return
         self.worker.submit("write_u16", 0x0102, value)
-        self.debug_log.appendPlainText(f"Trigger 0x0102 = {value}")
+        self.debug_log.appendPlainText(f"触发寄存器 0x0102 = {value}")
 
     @Slot(object)
     def _on_command_result(self, result: Any) -> None:
@@ -359,7 +417,7 @@ class MainWindow(QMainWindow):
     def _stop_network_services(self) -> None:
         if self.services is not None:
             self.services.stop_all()
-        self.debug_log.appendPlainText("Network services stopped")
+        self.debug_log.appendPlainText("网络服务已停止")
 
     def _apply_network_services(self) -> None:
         network = self.config_store.config.network
@@ -385,11 +443,11 @@ class MainWindow(QMainWindow):
             self.services.start_hamlib(network.hamlib_host, network.hamlib_port)
         if network.gs232_enabled and network.gs232_port:
             self.services.start_gs232(network.gs232_port, network.gs232_baudrate, self.integration_log.emit)
-        self.debug_log.appendPlainText("Network services applied")
+        self.debug_log.appendPlainText("网络服务已应用")
 
     @Slot(str)
     def _on_worker_error(self, message: str) -> None:
-        self.debug_log.appendPlainText(f"ERROR {message}")
+        self.debug_log.appendPlainText(f"错误：{message}")
 
     def _calibrate_current(self) -> None:
         self.planner.calibrate_current(self.calibrate_angle.value())
@@ -399,33 +457,71 @@ class MainWindow(QMainWindow):
             true_azimuth_deg=self.planner.true_azimuth_deg,
             last_true_azimuth_deg=self.planner.true_azimuth_deg,
         )
-        self.current_label.setText(f"{self.planner.display_angle_deg:05.1f} deg")
+        self.current_label.setText(f"{self.planner.display_angle_deg:05.1f}°")
         self.compass.set_angles(self.planner.display_angle_deg)
 
+    def _browse_setupc(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择 com0com setupc.exe",
+            self.com0com_setupc.text().strip() or "",
+            "setupc.exe (setupc.exe);;可执行文件 (*.exe);;所有文件 (*)",
+        )
+        if path:
+            self.com0com_setupc.setText(path)
+            self.com0com_manager.set_setupc_path(path)
+
+    def _com0com_values(self) -> tuple[str, str, str]:
+        path = self.com0com_setupc.text().strip()
+        left = self.com0com_left_port.text().strip()
+        right = self.com0com_right_port.text().strip()
+        return path, left, right
+
     def _check_com0com(self) -> None:
-        status = self.com0com_manager.status()
+        path, _left, _right = self._com0com_values()
+        self.com0com_manager.set_setupc_path(path)
+        status = self.com0com_manager.status(path or None)
         self.com0com_status.setText(status.message)
 
     def _create_com0com_pair(self) -> None:
-        status = self.com0com_manager.status()
+        path, left, right = self._com0com_values()
+        if not left or not right:
+            self.com0com_status.setText("左右端口名称不能为空")
+            return
+        if left.casefold() == right.casefold():
+            self.com0com_status.setText("左右端口名称不能相同")
+            return
+        self.config_store.update(
+            com0com_setupc_path=path,
+            com0com_left_port=left,
+            com0com_right_port=right,
+        )
+        self.com0com_manager.set_setupc_path(path)
+        status = self.com0com_manager.status(path or None)
         self.com0com_status.setText(status.message)
         if not status.can_create or status.executable is None:
             return
-        self.com0com_process.start(str(status.executable), ["install", "PortName=COM10", "PortName=COM11"])
-        self.com0com_status.setText("Creating COM10/COM11...")
+        self.com0com_process.start(
+            str(status.executable),
+            ["install", f"PortName={left}", f"PortName={right}"],
+        )
+        self.com0com_status.setText(f"正在创建 {left}/{right}…")
 
     def _com0com_finished(self, exit_code: int, _exit_status) -> None:
         stdout = bytes(self.com0com_process.readAllStandardOutput()).decode(errors="replace").strip()
         stderr = bytes(self.com0com_process.readAllStandardError()).decode(errors="replace").strip()
         detail = stderr or stdout or f"exit code {exit_code}"
-        self.com0com_status.setText("COM10/COM11 created" if exit_code == 0 else f"com0com failed: {detail}")
+        _path, left, right = self._com0com_values()
+        self.com0com_status.setText(
+            f"已创建 {left}/{right}" if exit_code == 0 else f"com0com 创建失败：{detail}"
+        )
 
     def _com0com_error(self, _error) -> None:
-        self.com0com_status.setText("Unable to run setupc.exe; check com0com installation and permissions")
+        self.com0com_status.setText("无法运行 setupc.exe，请检查安装路径和管理员权限")
 
     @Slot(bool)
     def _on_online(self, online: bool) -> None:
-        self.connection_label.setText("ONLINE" if online else "OFFLINE")
+        self.connection_label.setText("在线" if online else "离线")
         self.connection_label.setProperty("online", online)
         self.connection_label.style().unpolish(self.connection_label)
         self.connection_label.style().polish(self.connection_label)
@@ -444,10 +540,10 @@ class MainWindow(QMainWindow):
             last_true_azimuth_deg=self.planner.true_azimuth_deg,
         )
         display = self.planner.display_angle_deg
-        self.current_label.setText(f"{display:05.1f} deg")
+        self.current_label.setText(f"{display:05.1f}°")
         self.compass.set_angles(display, self.compass.target_azimuth)
-        self.run_status.setText("RUNNING" if telemetry.get("running") else "STOPPED")
-        self.temperature_label.setText(f"Temp {telemetry.get('temperature', '--')}")
+        self.run_status.setText("运行中" if telemetry.get("running") else "已停止")
+        self.temperature_label.setText(f"温度 {telemetry.get('temperature', '--')}")
         limit_status = int(telemetry.get("limit_status", 0) or 0)
         alarm_status = int(telemetry.get("alarm_status", 0) or 0)
         self._set_indicator(self.s0_indicator, bool(limit_status & 0x01))
@@ -456,7 +552,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _set_indicator(indicator: QLabel, active: bool) -> None:
-        indicator.setText(f"{indicator.text().split()[0]} {'ON' if active else 'OFF'}")
+        indicator.setText(f"{indicator.text().split()[0]} {'开' if active else '关'}")
         indicator.setProperty("active", active)
         indicator.style().unpolish(indicator)
         indicator.style().polish(indicator)
@@ -482,7 +578,7 @@ class MainWindow(QMainWindow):
 def apply_dark_theme(app) -> None:
     app.setStyleSheet(
         """
-        QWidget { background: #10151b; color: #e6edf3; font-family: 'Segoe UI'; }
+        QWidget { background: #10151b; color: #e6edf3; font-family: 'Microsoft YaHei', 'Segoe UI'; }
         QGroupBox, QTabWidget::pane { border: 1px solid #35414c; }
         QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit { background: #18212a; border: 1px solid #41515e; padding: 4px; }
         QPushButton { background: #263441; border: 1px solid #4d6271; padding: 7px 12px; }

@@ -15,9 +15,9 @@ from .workers.modbus_worker import ModbusWorker, SimulatedBackend
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Modbus Rotator control dashboard")
-    parser.add_argument("--simulate", action="store_true", help="Use simulated backend without a serial port")
-    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser = argparse.ArgumentParser(description="Modbus 转台控制台")
+    parser.add_argument("--simulate", action="store_true", help="使用模拟设备，不打开串口")
+    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="日志级别")
     return parser
 
 
@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         planner, worker, services = create_runtime(store, args.simulate)
     except Exception as exc:  # noqa: BLE001
-        QMessageBox.critical(None, "Modbus Rotator", str(exc))
+        QMessageBox.critical(None, "Modbus 转台", str(exc))
         store.close()
         return 2
     window = MainWindow(store, worker, planner, services=services)
