@@ -1,0 +1,4 @@
+PySide6>=6.6
+minimalmodbus>=2.1
+pyserial>=3.5
+
